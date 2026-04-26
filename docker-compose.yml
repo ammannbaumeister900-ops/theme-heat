@@ -1,0 +1,87 @@
+name: theme-heat
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: theme-heat-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-theme_heat}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-theme_heat}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    container_name: theme-heat-backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      API_PREFIX: ${API_PREFIX:-/api}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://postgres:postgres@postgres:5432/theme_heat}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1,https://your-domain.com}
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
+      SCHEDULER_TIMEZONE: ${SCHEDULER_TIMEZONE:-Asia/Shanghai}
+      SCHEDULER_CRON_DAY_OF_WEEK: ${SCHEDULER_CRON_DAY_OF_WEEK:-sun}
+      SCHEDULER_CRON_HOUR: ${SCHEDULER_CRON_HOUR:-18}
+      SCHEDULER_CRON_MINUTE: ${SCHEDULER_CRON_MINUTE:-0}
+      DEFAULT_THEME_TYPES: ${DEFAULT_THEME_TYPES:-industry,concept}
+      RANKING_LIMIT: ${RANKING_LIMIT:-20}
+      STRONG_SCORE_THRESHOLD: ${STRONG_SCORE_THRESHOLD:-65}
+      COMPUTE_BATCH_SIZE: ${COMPUTE_BATCH_SIZE:-10}
+      COMPUTE_BATCH_PAUSE_SECONDS: ${COMPUTE_BATCH_PAUSE_SECONDS:-0.3}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: theme-heat-frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-http://backend:8000/api}
+      NEXT_PUBLIC_API_BASE_PATH: ${NEXT_PUBLIC_API_BASE_PATH:-/api}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: theme-heat-nginx
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

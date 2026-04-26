@@ -1,0 +1,81 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #071023;
+  --bg-soft: #0f1c34;
+  --panel: rgba(15, 28, 52, 0.82);
+  --panel-strong: #132644;
+  --line: rgba(154, 180, 255, 0.14);
+  --text: #edf3ff;
+  --muted: #8ea5ca;
+  --accent: #3ccf91;
+  --accent-soft: #1d7e63;
+  --danger: #ff6a6a;
+  --warning: #ffcc66;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(60, 207, 145, 0.18), transparent 28%),
+    radial-gradient(circle at top right, rgba(91, 133, 255, 0.18), transparent 32%),
+    linear-gradient(160deg, #071023 0%, #091221 35%, #0f1c34 100%);
+  font-family: "DM Sans", sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.dashboard-shell {
+  position: relative;
+}
+
+.dashboard-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px);
+  background-size: 42px 42px;
+  opacity: 0.06;
+  pointer-events: none;
+}
+
+.glass-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 24px 80px rgba(7, 16, 35, 0.24);
+  backdrop-filter: blur(20px);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fade-rise {
+    animation: fade-rise 0.6s ease both;
+  }
+
+  @keyframes fade-rise {
+    from {
+      opacity: 0;
+      transform: translateY(18px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
