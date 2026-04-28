@@ -54,6 +54,9 @@ class AKShareService:
     @staticmethod
     def normalize_symbol(value: str) -> str:
         text = str(value).strip()
+        lower_text = text.lower()
+        if len(lower_text) >= 8 and lower_text[:2] in {"bj", "sh", "sz"} and lower_text[2:8].isdigit():
+            return lower_text[2:8]
         if "." in text:
             return text
         return text.zfill(6)
@@ -102,6 +105,30 @@ class AKShareService:
         if df is None:
             return []
         return self._normalize_tx_quote_records(df)
+
+    def fetch_latest_stock_snapshots(self) -> dict[str, dict]:
+        df = self._retry_call(ak.stock_zh_a_spot_em, operation="stock-spot-em")
+        if df is None or df.empty:
+            df = self._retry_call(ak.stock_zh_a_spot, operation="stock-spot")
+        if df is None or df.empty:
+            return {}
+
+        snapshots: dict[str, dict] = {}
+        for _, row in df.iterrows():
+            symbol = self._get_row_value(row, 1, "代码")
+            if symbol is None:
+                continue
+            close_price = self._safe_float(self._get_row_value(row, 3, "最新价"))
+            pct_change = self._safe_float(self._get_row_value(row, 4, "涨跌幅"))
+            turnover_amount = self._safe_float(self._get_row_value(row, 7, "成交额"))
+            if close_price is None or pct_change is None or turnover_amount is None:
+                continue
+            snapshots[self.normalize_symbol(str(symbol))] = {
+                "close_price": close_price,
+                "pct_change": pct_change,
+                "turnover_amount": turnover_amount,
+            }
+        return snapshots
 
     def fetch_market_news(self, limit: int = 8) -> list[dict]:
         records = self._fetch_market_news_from_em(limit)
@@ -218,6 +245,21 @@ class AKShareService:
         end_date = date.today()
         start_date = end_date - timedelta(days=7 * weeks)
         return start_date, end_date
+
+    def get_latest_trading_day(self, target_date: date | None = None) -> date:
+        target_date = target_date or date.today()
+        df = self._retry_call(ak.tool_trade_date_hist_sina, operation="trade-calendar-sina")
+        if df is None or df.empty:
+            return target_date
+
+        latest: date | None = None
+        for column in df.columns:
+            parsed_dates = pd.to_datetime(df[column], errors="coerce").dt.date
+            candidates = [item for item in parsed_dates.dropna() if item <= target_date]
+            if candidates:
+                column_latest = max(candidates)
+                latest = column_latest if latest is None else max(latest, column_latest)
+        return latest or target_date
 
     def is_trading_day(self, target_date: date) -> bool:
         if target_date.weekday() >= 5:
@@ -476,6 +518,14 @@ class AKShareService:
             return float(text)
         except ValueError:
             return None
+
+    @staticmethod
+    def _get_row_value(row, index: int, column: str):
+        if column in row.index:
+            return row.get(column)
+        if len(row) > index:
+            return row.iloc[index]
+        return None
 
     @classmethod
     def _parse_amount_value(cls, value) -> float | None:
