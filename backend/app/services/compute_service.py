@@ -199,6 +199,30 @@ class ComputeService:
         start_date, end_date = self.ak_service.get_quote_window(weeks=2)
         stocks = db.scalars(select(Stock).order_by(Stock.symbol)).all()
         refreshed_count = 0
+
+        latest_trade_date = self.ak_service.get_latest_trading_day(end_date)
+        snapshots = self.ak_service.fetch_latest_stock_snapshots()
+        if snapshots:
+            for stock in stocks:
+                if stock.symbol in fetched_quotes_by_symbol:
+                    continue
+                snapshot = snapshots.get(stock.symbol)
+                if snapshot is None:
+                    continue
+                self.upsert_quote(
+                    db,
+                    stock_id=stock.id,
+                    trade_date=latest_trade_date,
+                    close_price=snapshot["close_price"],
+                    pct_change=snapshot["pct_change"],
+                    turnover_amount=snapshot["turnover_amount"],
+                )
+                fetched_quotes_by_symbol.add(stock.symbol)
+                refreshed_count += 1
+            db.commit()
+            if refreshed_count:
+                return refreshed_count
+
         for stock in stocks:
             if stock.symbol in fetched_quotes_by_symbol:
                 continue
