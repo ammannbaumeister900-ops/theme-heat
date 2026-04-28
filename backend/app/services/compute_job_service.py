@@ -27,6 +27,14 @@ class ComputeJobService:
         self._active_job_id: int | None = None
 
     def trigger(self, db: Session) -> ComputeJobTriggerResponse:
+        active_job = self._get_active_job(db)
+        if active_job is not None:
+            return ComputeJobTriggerResponse(
+                success=True,
+                message="Existing compute job is already running",
+                job=self.to_schema(active_job),
+            )
+
         job = self._get_resumable_job(db)
         if job is None:
             job = ComputeJob(
@@ -51,20 +59,46 @@ class ComputeJobService:
                 db.refresh(job)
             message = "Existing compute job resumed"
 
-        self._ensure_worker(job.id)
+        self._ensure_worker(job.id, "full")
         return ComputeJobTriggerResponse(success=True, message=message, job=self.to_schema(job))
+
+    def trigger_daily_refresh(self, db: Session) -> ComputeJobTriggerResponse:
+        active_job = self._get_active_job(db)
+        if active_job is not None:
+            return ComputeJobTriggerResponse(
+                success=True,
+                message="Existing compute job is already running",
+                job=self.to_schema(active_job),
+            )
+
+        job = ComputeJob(
+            status="pending",
+            stage="queued",
+            message="Daily quote refresh queued",
+            heartbeat_at=datetime.utcnow(),
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        self._ensure_worker(job.id, "daily")
+        return ComputeJobTriggerResponse(success=True, message="Daily refresh job created", job=self.to_schema(job))
 
     def resume_incomplete_jobs(self) -> None:
         db = SessionLocal()
         try:
             job = self._get_resumable_job(db, include_failed=False)
             if job is not None:
-                self._ensure_worker(job.id)
+                mode = "daily" if (job.message or "").lower().startswith("daily") else "full"
+                self._ensure_worker(job.id, mode)
         finally:
             db.close()
 
     def get_latest_job(self, db: Session) -> ComputeJob | None:
         return db.scalar(select(ComputeJob).order_by(desc(ComputeJob.id)))
+
+    def list_jobs(self, db: Session, limit: int = 20) -> list[ComputeJob]:
+        safe_limit = max(1, min(limit, 100))
+        return list(db.scalars(select(ComputeJob).order_by(desc(ComputeJob.id)).limit(safe_limit)))
 
     def get_job(self, db: Session, job_id: int) -> ComputeJob | None:
         return db.get(ComputeJob, job_id)
@@ -99,12 +133,20 @@ class ComputeJobService:
             .order_by(desc(ComputeJob.id))
         )
 
-    def _ensure_worker(self, job_id: int) -> None:
+    def _get_active_job(self, db: Session) -> ComputeJob | None:
+        return db.scalar(
+            select(ComputeJob)
+            .where(ComputeJob.status.in_(["pending", "running"]))
+            .order_by(desc(ComputeJob.id))
+        )
+
+    def _ensure_worker(self, job_id: int, mode: str) -> None:
         with self._lock:
             if self._worker and self._worker.is_alive() and self._active_job_id == job_id:
                 return
             self._active_job_id = job_id
-            self._worker = threading.Thread(target=self._run_job, args=(job_id,), daemon=True)
+            target = self._run_daily_job if mode == "daily" else self._run_job
+            self._worker = threading.Thread(target=target, args=(job_id,), daemon=True)
             self._worker.start()
 
     def _run_job(self, job_id: int) -> None:
@@ -191,6 +233,66 @@ class ComputeJobService:
                 failed_job.stage = "failed"
                 failed_job.error_message = str(exc)
                 failed_job.message = "Job failed"
+                failed_job.finished_at = datetime.utcnow()
+                failed_job.heartbeat_at = datetime.utcnow()
+                db.commit()
+        finally:
+            db.close()
+            with self._lock:
+                if self._active_job_id == job_id:
+                    self._active_job_id = None
+                self._worker = None
+
+    def _run_daily_job(self, job_id: int) -> None:
+        fetched_quotes_by_symbol: set[str] = set()
+        db = SessionLocal()
+        try:
+            job = db.get(ComputeJob, job_id)
+            if job is None:
+                return
+
+            job.status = "running"
+            job.stage = "quotes"
+            job.started_at = job.started_at or datetime.utcnow()
+            job.message = "Refreshing existing stock quotes"
+            job.error_message = None
+            job.heartbeat_at = datetime.utcnow()
+            db.commit()
+
+            refreshed_count = self.compute_service.refresh_existing_stock_quotes(db, fetched_quotes_by_symbol)
+
+            job = db.get(ComputeJob, job_id)
+            if job is None:
+                return
+            job.stage = "scoring"
+            job.processed_theme_count = refreshed_count
+            job.synced_theme_count = refreshed_count
+            job.message = f"Refreshed quotes for {refreshed_count} stocks"
+            job.heartbeat_at = datetime.utcnow()
+            db.commit()
+
+            score_count = self.compute_service.compute_scores_only(db)
+
+            job = db.get(ComputeJob, job_id)
+            if job is None:
+                return
+            job.status = "completed"
+            job.stage = "completed"
+            job.score_count = score_count
+            job.message = "Daily refresh completed"
+            job.error_message = None
+            job.finished_at = datetime.utcnow()
+            job.heartbeat_at = datetime.utcnow()
+            db.commit()
+        except Exception as exc:
+            logger.exception("daily compute job %s failed", job_id)
+            db.rollback()
+            failed_job = db.get(ComputeJob, job_id)
+            if failed_job is not None:
+                failed_job.status = "failed"
+                failed_job.stage = "failed"
+                failed_job.error_message = str(exc)
+                failed_job.message = "Daily refresh failed"
                 failed_job.finished_at = datetime.utcnow()
                 failed_job.heartbeat_at = datetime.utcnow()
                 db.commit()

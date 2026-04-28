@@ -9,7 +9,7 @@ from sqlalchemy import delete, desc, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models import ComputeJob, DailyQuote, Theme, ThemeScore, ThemeStock
+from app.models import ComputeJob, DailyQuote, Stock, Theme, ThemeScore, ThemeStock
 from app.schemas.compute import ComputeResponse
 from app.services.akshare_service import AKShareService
 from app.services.theme_service import ensure_theme_stock_relation, upsert_stock, upsert_theme
@@ -193,6 +193,30 @@ class ComputeService:
         week_start, week_end = self._get_current_week()
         metrics_list = self._collect_metrics(db, week_start, week_end)
         return self._persist_scores(db, metrics_list, week_start, week_end)
+
+    def refresh_existing_stock_quotes(self, db: Session, fetched_quotes_by_symbol: set[str] | None = None) -> int:
+        fetched_quotes_by_symbol = fetched_quotes_by_symbol or set()
+        start_date, end_date = self.ak_service.get_quote_window(weeks=2)
+        stocks = db.scalars(select(Stock).order_by(Stock.symbol)).all()
+        refreshed_count = 0
+        for stock in stocks:
+            if stock.symbol in fetched_quotes_by_symbol:
+                continue
+            quotes = self.ak_service.fetch_stock_quotes(stock.symbol, start_date, end_date)
+            for quote in quotes:
+                self.upsert_quote(
+                    db,
+                    stock_id=stock.id,
+                    trade_date=quote["trade_date"],
+                    close_price=quote["close_price"],
+                    pct_change=quote["pct_change"],
+                    turnover_amount=quote["turnover_amount"],
+                )
+            fetched_quotes_by_symbol.add(stock.symbol)
+            if quotes:
+                refreshed_count += 1
+        db.commit()
+        return refreshed_count
 
     def _persist_scores(self, db: Session, metrics_list: list[ThemeWeekMetrics], week_start: date, week_end: date) -> int:
         total_turnover_market = sum(item.total_turnover for item in metrics_list) or 1.0
