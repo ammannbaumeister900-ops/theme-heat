@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.core.config import get_settings
+from app.db.migrations import run_startup_migrations
 from app.db.session import Base, engine
 from app.models import ComputeJob, DailyQuote, Stock, Theme, ThemeScore, ThemeStock
 from app.services.compute_job_service import compute_job_service
@@ -19,6 +20,7 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    run_startup_migrations(engine)
     compute_job_service.resume_incomplete_jobs()
     start_scheduler()
     yield

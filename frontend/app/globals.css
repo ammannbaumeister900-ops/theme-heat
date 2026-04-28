@@ -5,11 +5,11 @@
 @tailwind utilities;
 
 :root {
-  --bg: #071023;
-  --bg-soft: #0f1c34;
-  --panel: rgba(15, 28, 52, 0.82);
-  --panel-strong: #132644;
-  --line: rgba(154, 180, 255, 0.14);
+  --bg: #07111f;
+  --bg-soft: #0a1728;
+  --panel: rgba(10, 23, 40, 0.96);
+  --panel-strong: #101f33;
+  --line: rgba(100, 116, 139, 0.28);
   --text: #edf3ff;
   --muted: #8ea5ca;
   --accent: #3ccf91;
@@ -30,10 +30,7 @@ body {
   margin: 0;
   min-height: 100vh;
   color: var(--text);
-  background:
-    radial-gradient(circle at top left, rgba(60, 207, 145, 0.18), transparent 28%),
-    radial-gradient(circle at top right, rgba(91, 133, 255, 0.18), transparent 32%),
-    linear-gradient(160deg, #071023 0%, #091221 35%, #0f1c34 100%);
+  background: #07111f;
   font-family: "DM Sans", sans-serif;
 }
 
@@ -61,6 +58,15 @@ a {
   border: 1px solid var(--line);
   box-shadow: 0 24px 80px rgba(7, 16, 35, 0.24);
   backdrop-filter: blur(20px);
+}
+
+.terminal-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(16, 31, 51, 0.98), rgba(8, 18, 31, 0.98)),
+    var(--panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 16px 48px rgba(0, 0, 0, 0.18);
 }
 
 @media (prefers-reduced-motion: no-preference) {

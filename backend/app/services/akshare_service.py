@@ -103,6 +103,74 @@ class AKShareService:
             return []
         return self._normalize_tx_quote_records(df)
 
+    def fetch_market_news(self, limit: int = 8) -> list[dict]:
+        records = self._fetch_market_news_from_em(limit)
+        if records:
+            return records
+        records = self._fetch_market_news_from_cls(limit)
+        if records:
+            return records
+        return self._fetch_market_news_from_sina(limit)
+
+    def _fetch_market_news_from_em(self, limit: int) -> list[dict]:
+        df = self._retry_call(ak.stock_info_global_em, operation="market-news-em")
+        if df is None or df.empty:
+            return []
+        records: list[dict] = []
+        for _, row in df.head(limit).iterrows():
+            title = str(row.get("标题") or "").strip()
+            if not title:
+                continue
+            records.append(
+                {
+                    "title": title,
+                    "summary": str(row.get("摘要") or "").strip() or None,
+                    "published_at": str(row.get("发布时间") or "").strip() or None,
+                    "source": "东方财富",
+                    "url": str(row.get("链接") or "").strip() or None,
+                }
+            )
+        return records
+
+    def _fetch_market_news_from_cls(self, limit: int) -> list[dict]:
+        df = self._retry_call(ak.stock_info_global_cls, operation="market-news-cls")
+        if df is None or df.empty:
+            return []
+        records: list[dict] = []
+        for _, row in df.head(limit).iterrows():
+            title = str(row.get("标题") or "").strip()
+            content = str(row.get("内容") or "").strip()
+            records.append(
+                {
+                    "title": title or content[:48],
+                    "summary": content or None,
+                    "published_at": f"{row.get('发布日期') or ''} {row.get('发布时间') or ''}".strip() or None,
+                    "source": "财联社",
+                    "url": None,
+                }
+            )
+        return [item for item in records if item["title"]]
+
+    def _fetch_market_news_from_sina(self, limit: int) -> list[dict]:
+        df = self._retry_call(ak.stock_info_global_sina, operation="market-news-sina")
+        if df is None or df.empty:
+            return []
+        records: list[dict] = []
+        for _, row in df.head(limit).iterrows():
+            content = str(row.get("内容") or "").strip()
+            if not content:
+                continue
+            records.append(
+                {
+                    "title": content[:48],
+                    "summary": content,
+                    "published_at": str(row.get("时间") or "").strip() or None,
+                    "source": "新浪财经",
+                    "url": None,
+                }
+            )
+        return records
+
     def _normalize_em_quote_records(self, df: pd.DataFrame) -> list[dict]:
         records: list[dict] = []
         for _, row in df.iterrows():
@@ -150,6 +218,21 @@ class AKShareService:
         end_date = date.today()
         start_date = end_date - timedelta(days=7 * weeks)
         return start_date, end_date
+
+    def is_trading_day(self, target_date: date) -> bool:
+        if target_date.weekday() >= 5:
+            return False
+
+        df = self._retry_call(ak.tool_trade_date_hist_sina, operation="trade-calendar-sina")
+        if df is None or df.empty:
+            logger.warning("trade calendar unavailable; falling back to weekday for %s", target_date)
+            return True
+
+        for column in df.columns:
+            parsed_dates = pd.to_datetime(df[column], errors="coerce").dt.date
+            if target_date in set(parsed_dates.dropna()):
+                return True
+        return False
 
     def _retry_call(self, func, operation: str):
         last_error: Exception | None = None

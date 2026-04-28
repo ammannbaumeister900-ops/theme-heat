@@ -11,9 +11,14 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost,http://127.0.0.1"
     scheduler_enabled: bool = True
     scheduler_timezone: str = "Asia/Shanghai"
-    scheduler_cron_day_of_week: str = "sun"
-    scheduler_cron_hour: int = 18
-    scheduler_cron_minute: int = 0
+    scheduler_cron_day_of_week: str = "*"
+    scheduler_cron_hour: int = 20
+    scheduler_cron_minute: int = 30
+    scheduler_skip_non_trading_days: bool = True
+    full_sync_enabled: bool = True
+    full_sync_cron_day_of_week: str = "fri"
+    full_sync_cron_hour: int = 21
+    full_sync_cron_minute: int = 30
     default_theme_types: str = "industry,concept"
     ranking_limit: int = 20
     strong_score_threshold: float = 65.0
